@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/base64"
 	"fmt"
 	"io"
 	"net/http"
@@ -10,7 +11,6 @@ import (
 )
 
 func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Request) {
-	// Authentication and parsing are already handled
 	videoIDString := r.PathValue("videoID")
 	videoID, err := uuid.Parse(videoIDString)
 	if err != nil {
@@ -28,7 +28,6 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	// 1. Parse the form data
 	const maxMemory = 10 << 20 // 10MB
 	err = r.ParseMultipartForm(maxMemory)
 	if err != nil {
@@ -36,7 +35,6 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	// 2. Get the image data from the form
 	file, header, err := r.FormFile("thumbnail")
 	if err != nil {
 		respondWithError(w, http.StatusBadRequest, "Unable to parse form file", err)
@@ -44,17 +42,14 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 	}
 	defer file.Close()
 
-	// 3. Read image data into a byte slice
 	imgData, err := io.ReadAll(file)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Unable to read image data", err)
 		return
 	}
 
-	// 4. Get the media type from the form file's header
 	mediaType := header.Header.Get("Content-Type")
 
-	// 5. Get video metadata and verify ownership
 	video, err := cfg.db.GetVideo(videoID)
 	if err != nil {
 		respondWithError(w, http.StatusNotFound, "Couldn't find video", err)
@@ -65,21 +60,19 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	// 6. Save the thumbnail to the global map
-	videoThumbnails[videoID] = thumbnail{
-		data:      imgData,
-		mediaType: mediaType,
-	}
+	// Encode the image data to a base64 string
+	base64String := base64.StdEncoding.EncodeToString(imgData)
 
-	// 7. Update the video metadata with the new thumbnail URL
-	thumbnailURL := fmt.Sprintf("http://localhost:%s/api/thumbnails/%s", cfg.port, videoID)
-	video.ThumbnailURL = &thumbnailURL
+	// Create a data URL
+	dataURL := fmt.Sprintf("data:%s;base64,%s", mediaType, base64String)
+
+	// Store the data URL in the thumbnail_url column
+	video.ThumbnailURL = &dataURL
 	err = cfg.db.UpdateVideo(video)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Failed to update video", err)
 		return
 	}
 
-	// 8. Respond with the updated video's metadata
 	respondWithJSON(w, http.StatusOK, video)
 }
