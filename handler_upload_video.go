@@ -76,6 +76,22 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// Get aspect ratio to determine the prefix
+	aspectRatio, err := getVideoAspectRatio(tempFile.Name())
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Couldn't get video aspect ratio", err)
+		return
+	}
+	var prefix string
+	switch aspectRatio {
+	case "landscape":
+		prefix = "landscape"
+	case "portrait":
+		prefix = "portrait"
+	default:
+		prefix = "other"
+	}
+
 	_, err = tempFile.Seek(0, io.SeekStart)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Couldn't seek in temp file", err)
@@ -88,7 +104,8 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		respondWithError(w, http.StatusInternalServerError, "Couldn't generate random key", err)
 		return
 	}
-	key := hex.EncodeToString(randBytes) + ".mp4"
+	fileName := hex.EncodeToString(randBytes) + ".mp4"
+	key := fmt.Sprintf("%s/%s", prefix, fileName)
 
 	_, err = cfg.s3Client.PutObject(context.TODO(), &s3.PutObjectInput{
 		Bucket:      aws.String(cfg.s3Bucket),
@@ -111,3 +128,4 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 
 	respondWithJSON(w, http.StatusOK, video)
 }
+
