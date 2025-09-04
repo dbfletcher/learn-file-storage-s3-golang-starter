@@ -261,7 +261,8 @@ function viewVideo(video) {
     thumbnailImg.style.display = 'none';
   } else {
     thumbnailImg.style.display = 'block';
-    thumbnailImg.src = video.thumbnail_url;
+    // By adding the current time as a query parameter, we "bust" the browser's cache
+    thumbnailImg.src = `${video.thumbnail_url}?v=${Date.now()}`;
   }
 
   const videoPlayer = document.getElementById('video-player');
