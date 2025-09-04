@@ -62,21 +62,43 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// Create a temporary file to store the initial upload
 	tempFile, err := os.CreateTemp("", "tubely-upload-*.mp4")
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Couldn't create temp file", err)
 		return
 	}
-	defer os.Remove(tempFile.Name())
-	defer tempFile.Close()
+	defer os.Remove(tempFile.Name()) // Clean up the original temp file
 
+	// Copy the uploaded content to the temporary file
 	_, err = io.Copy(tempFile, file)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Couldn't copy to temp file", err)
 		return
 	}
+	// We must close the file so that ffmpeg can read it
+	if err := tempFile.Close(); err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Couldn't close temp file", err)
+		return
+	}
 
-	// Get aspect ratio to determine the prefix
+	// Process the video to enable fast start
+	processedFilePath, err := processVideoForFastStart(tempFile.Name())
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Couldn't process video", err)
+		return
+	}
+	defer os.Remove(processedFilePath) // Clean up the processed temp file
+
+	// Open the *processed* file for reading
+	processedFile, err := os.Open(processedFilePath)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Couldn't open processed file", err)
+		return
+	}
+	defer processedFile.Close()
+
+	// Get aspect ratio from the original temp file to determine the S3 prefix
 	aspectRatio, err := getVideoAspectRatio(tempFile.Name())
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Couldn't get video aspect ratio", err)
@@ -92,12 +114,6 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		prefix = "other"
 	}
 
-	_, err = tempFile.Seek(0, io.SeekStart)
-	if err != nil {
-		respondWithError(w, http.StatusInternalServerError, "Couldn't seek in temp file", err)
-		return
-	}
-
 	randBytes := make([]byte, 16)
 	_, err = rand.Read(randBytes)
 	if err != nil {
@@ -107,10 +123,11 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 	fileName := hex.EncodeToString(randBytes) + ".mp4"
 	key := fmt.Sprintf("%s/%s", prefix, fileName)
 
+	// Upload the *processed* file to S3
 	_, err = cfg.s3Client.PutObject(context.TODO(), &s3.PutObjectInput{
 		Bucket:      aws.String(cfg.s3Bucket),
 		Key:         aws.String(key),
-		Body:        tempFile,
+		Body:        processedFile,
 		ContentType: aws.String("video/mp4"),
 	})
 	if err != nil {
