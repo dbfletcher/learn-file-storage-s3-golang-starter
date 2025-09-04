@@ -261,8 +261,8 @@ function viewVideo(video) {
     thumbnailImg.style.display = 'none';
   } else {
     thumbnailImg.style.display = 'block';
-    // By adding the current time as a query parameter, we "bust" the browser's cache
-    thumbnailImg.src = `${video.thumbnail_url}?v=${Date.now()}`;
+    // Reverted back to the original code
+    thumbnailImg.src = video.thumbnail_url;
   }
 
   const videoPlayer = document.getElementById('video-player');
@@ -300,3 +300,4 @@ async function deleteVideo() {
     alert(`Error: ${error.message}`);
   }
 }
+

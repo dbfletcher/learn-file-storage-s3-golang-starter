@@ -24,13 +24,6 @@ type apiConfig struct {
 	port             string
 }
 
-// The thumbnail struct and videoThumbnails map are no longer needed
-// type thumbnail struct {
-// 	data      []byte
-// 	mediaType string
-// }
-// var videoThumbnails = map[uuid.UUID]thumbnail{}
-
 func main() {
 	godotenv.Load(".env")
 
@@ -106,7 +99,7 @@ func main() {
 	mux.Handle("/app/", appHandler)
 
 	assetsHandler := http.StripPrefix("/assets", http.FileServer(http.Dir(assetsRoot)))
-	mux.Handle("/assets/", cacheMiddleware(assetsHandler))
+	mux.Handle("/assets/", noCacheMiddleware(assetsHandler))
 
 	mux.HandleFunc("POST /api/login", cfg.handlerLogin)
 	mux.HandleFunc("POST /api/refresh", cfg.handlerRefresh)
@@ -119,8 +112,6 @@ func main() {
 	mux.HandleFunc("POST /api/video_upload/{videoID}", cfg.handlerUploadVideo)
 	mux.HandleFunc("GET /api/videos", cfg.handlerVideosRetrieve)
 	mux.HandleFunc("GET /api/videos/{videoID}", cfg.handlerVideoGet)
-	// The GET /api/thumbnails/{videoID} route is no longer needed
-	// mux.HandleFunc("GET /api/thumbnails/{videoID}", cfg.handlerThumbnailGet)
 	mux.HandleFunc("DELETE /api/videos/{videoID}", cfg.handlerVideoMetaDelete)
 
 	mux.HandleFunc("POST /admin/reset", cfg.handlerReset)
@@ -133,3 +124,5 @@ func main() {
 	log.Printf("Serving on: http://localhost:%s/app/\n", port)
 	log.Fatal(srv.ListenAndServe())
 }
+
+
