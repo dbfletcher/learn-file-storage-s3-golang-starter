@@ -1,12 +1,14 @@
 package main
 
 import (
+	"crypto/rand"
+	"encoding/base64"
 	"fmt"
 	"io"
-	"mime"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/auth"
 	"github.com/google/uuid"
@@ -19,14 +21,26 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 		respondWithError(w, http.StatusBadRequest, "Invalid ID", err)
 		return
 	}
+
 	token, err := auth.GetBearerToken(r.Header)
 	if err != nil {
 		respondWithError(w, http.StatusUnauthorized, "Couldn't find JWT", err)
 		return
 	}
+
 	userID, err := auth.ValidateJWT(token, cfg.jwtSecret)
 	if err != nil {
 		respondWithError(w, http.StatusUnauthorized, "Couldn't validate JWT", err)
+		return
+	}
+
+	video, err := cfg.db.GetVideo(videoID)
+	if err != nil {
+		respondWithError(w, http.StatusNotFound, "Couldn't find video", err)
+		return
+	}
+	if video.UserID != userID {
+		respondWithError(w, http.StatusUnauthorized, "Not authorized to modify this video", nil)
 		return
 	}
 
@@ -44,45 +58,48 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 	}
 	defer file.Close()
 
-	video, err := cfg.db.GetVideo(videoID)
-	if err != nil {
-		respondWithError(w, http.StatusNotFound, "Couldn't find video", err)
-		return
-	}
-	if video.UserID != userID {
-		respondWithError(w, http.StatusUnauthorized, "Not authorized to modify this video", nil)
-		return
-	}
-
-	// 1. Determine the file extension from the Content-Type
 	mediaType := header.Header.Get("Content-Type")
-	extensions, err := mime.ExtensionsByType(mediaType)
-	if err != nil || len(extensions) == 0 {
-		respondWithError(w, http.StatusBadRequest, "Invalid or unsupported media type", err)
+	fileExt := ""
+	switch {
+	case strings.Contains(mediaType, "image/jpeg"):
+		fileExt = ".jpg"
+	case strings.Contains(mediaType, "image/png"):
+		fileExt = ".png"
+	case strings.Contains(mediaType, "image/gif"):
+		fileExt = ".gif"
+	case strings.Contains(mediaType, "application/pdf"):
+		fileExt = ".pdf"
+	default:
+		respondWithError(w, http.StatusBadRequest, "Invalid file type", nil)
 		return
 	}
-	fileExtension := extensions[0]
 
-	// 2. Create a unique filename and path
-	fileName := videoID.String() + fileExtension
+	// Generate a new random filename
+	randBytes := make([]byte, 32)
+	_, err = rand.Read(randBytes)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Couldn't generate random filename", err)
+		return
+	}
+	fileName := base64.RawURLEncoding.EncodeToString(randBytes) + fileExt
 	filePath := filepath.Join(cfg.assetsRoot, fileName)
 
-	// 3. Create the new file on disk
-	dst, err := os.Create(filePath)
+	// Create the new file on disk
+	newFile, err := os.Create(filePath)
 	if err != nil {
-		respondWithError(w, http.StatusInternalServerError, "Couldn't create file on server", err)
+		respondWithError(w, http.StatusInternalServerError, "Couldn't create file", err)
 		return
 	}
-	defer dst.Close()
+	defer newFile.Close()
 
-	// 4. Copy the uploaded file's content to the new file
-	_, err = io.Copy(dst, file)
+	// Copy the uploaded file's content to the new file
+	_, err = io.Copy(newFile, file)
 	if err != nil {
-		respondWithError(w, http.StatusInternalServerError, "Couldn't copy file contents", err)
+		respondWithError(w, http.StatusInternalServerError, "Couldn't copy file content", err)
 		return
 	}
 
-	// 5. Update the thumbnail_url in the database
+	// Update the video's thumbnail URL
 	thumbnailURL := fmt.Sprintf("http://localhost:%s/assets/%s", cfg.port, fileName)
 	video.ThumbnailURL = &thumbnailURL
 	err = cfg.db.UpdateVideo(video)
